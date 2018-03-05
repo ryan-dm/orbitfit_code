@@ -1,0 +1,210 @@
+-----README FILE-----
+
+Contents:
+Line 3 --- Contents
+Line 16 --- About the Scripts
+Line 106 --- Running the Scripts
+Line 189 --- Generating Plots
+
+This file describes the usage of several python scripts for fitting orbits to
+astrometry via MCMC, and plotting the posterior distributions of orbital
+parameters which result. Basic knowledge of MCMC and Keplerian orbits is assumed.
+
+All MCMC sampling is done with python's "emcee" package, by Dan Foreman-Mackey.
+
+
+---ABOUT THE SCRIPTS---
+
+These scripts are:
+Orbit fitting:
+1. orbitfit_mp.py : Bound (elliptical) orbits only; standard Keplerian elements
+2. orbitfit_hyper_mp.py : Unbound orbits allowed; standard Keplerian elements
+                            with semimajor axis (a) replaced by periastron dist (q)
+3. orbitfit_cart_mp.py : Unbound orbits allowed; Uses Cartesian initial state vector,
+                            not Keplerian elements.
+
+Orbit plotting:
+1. cart_plot_mp.py :       Converts samples into Keplerian elements (q,tau,...) and
+                           generates standard corner plot.
+2. cart_plot_mp_bound.py : Same as above, but only considers samples with e<1.
+3. hyper_plot_mp.py :      Generates standard (q,tau,...) corner plot.
+4. kepler_plot_mp.py :     Generates standard (a,tau,...) corner plot.
+
+Utility:
+1. cart_to_kepler.py : For converting xyz to Keplerian samples.
+2. ema_hyper.py : For solving Kepler's equation (eccentric & mean anomaly) in
+                   the general case for eccentricity (0<e<inf)
+3. grstat.py : Gelman Rubin statistics
+4. chainplot.py : Viewing individual MCMC chain samples
+5. koe_hyper_agnostic.py : Most keplerian solvers are wrapped in their orbitfiit.py
+                file. This one (finding Cartesian positions given Keplerian elements,
+                with tau in MJD) was useful to have outside.
+6. RK4_energy.py : Cheesy integrator. Delving in here and changing the Runge Kutta
+                timestep can dramatically change how quickly and how accurately the
+                code executes.
+
+
+The methods all involve 8 fit parameters. The first 6 parameters vary between
+scripts. The final 2 parameters are consistent between all scripts; these
+shared parameters are the total system mass ("M" or "mass") in solar masses
+and the parallax of the system ("parallax" or "para") in arcseconds.
+
+Parameters which are NOT shared are:
+Cartesian fitter: x,y,z,vx,vy,vz : 3D position and velocity components
+Elliptical fitter: a,tau,argp,lan,inc,ecc
+Hyperbolic fitter: q,tau,argp,lan,inc,ecc
+The elliptical and hyperbolic fitters use 5 identical parameters. "tau" is the epoch
+of periastron, "argp" is the argument of periastron, "lan" is the longitude of the
+ascending node, "inc" is the inclination, and "ecc" is the eccentricity.
+
+Please note that because the 6 parameters differ between the 3 fitters, it is
+NOT possible to use a plotting script intended for the output of a mismatched
+fitting script, i.e., orbitfit_hyper should be matched with hyper_plot.
+
+In all fitters, the coordinate system is right-handed, with the x-y plane
+corresponding to the plane of the sky. The positive x-axis points east, in the
+direction of increasing right ascension. The positive y-axis points north, in the
+direction of increasing declination. To complete the right-handed coordinate system,
+the positive z-axis points directly into the plane of the sky, away from the Earth.
+
+The angles represented by the longitude of the ascending node, the inclination, and
+the argument of periastron, in order, represent LEFT-HANDED rotations from the sky
+plane into the orbital plane. The longitude of the ascending node is a rotation from
+the positive y-axis toward the positive x-axis, with the z-axis as the rotation axis.
+The inclination is a rotation about the line of nodes (the rotated y-axis), from the
+positive x'-axis (the rotated x-axis) toward the positive z/z' axis. (To check this,
+remember that the orbit crosses from -z to +z at the ascending node, and that the
+planet's motion is counterclockwise as observed from earth for i<90 degrees and
+clockwise for i>90 degrees.) The last angle, the argument of periastron, rotates
+the coordinate system about the z''-axis, with the rotation moving from the line of
+nodes (the y'/y''-axis) toward the x''-axis.
+
+(These angles are considered "left-handed" since the traditional right-handed definition
+of the Cartesian plane involves an x-axis pointing right, a y-axis pointing up, and 
+rotations from +x CCW through the first quadrant toward +y. These angles reverse that,
+going CCW from +y to +x, then from +x' to +z', and again from +y'' to +x''.)
+
+Orbit fitting functions run for a specified number of steps, saving their progress
+in numerous files as they proceed (preventing significant loss of progress if a
+power outage or program crash occurs).
+
+Orbit plotting functions display a corner plot of covariances between MCMC fit
+parameters, histograms of posterior distributions of individual parameters,
+and an inset plot tracing the orbit through the observed astrometry. These
+scripts also have code for plotting the sampled values from MCMC chains and
+calculating the Gelman-Rubin statistic (for convergence checking), and for
+plotting the residuals of the maximum-likelihood orbit fit (for checking
+astrometry against the predicted orbit).
+
+
+
+---RUNNING THE SCRIPTS---
+
+To fit an orbit, you need to provide the following information.
+
+PRIORS::
+Priors are defined by setting conditional statements inside the function definition
+for logp(). This function is the natural logarithm of the prior probability given
+the fit parameters only. In the Cartesian orbitfit, the six (x,y,z) (vx,vy,vz) elements
+of the state vector are all treated with uniform priors with sharp cutoffs with generous
+boundaries. In the hyperbolic and elliptical fits, Keplerian elements are given flat
+priors with reasonable boundaries (such as 0-2pi for longitude of ascending node and 
+argument of periastron), with two exceptions. Inclination is drawn from a sinusoid, so
+we set a flat prior on the cosine of inclination, from -1 to 1. Semimajor axis or 
+periastron distance are drawn from logarithmic priors, with minimum and maximum values
+set as sharp cutoffs on a flat prior on either ln(a) or ln(q). Mass and parallax are fit
+using gaussian priors corresponding to previous measurements of these values (the mean
+and std dev of the gaussian are the reported value and 1-sigma error bar).
+
+Although some parameters could reasonably be left unbounded (mass, distance, and 
+for unbound orbits epoch of periastron), we set (very generous) hard cutoffs on these
+to prevent the code from wandering away to unreasonable extremes.
+
+Periodic variables such as longitude of the ascending node or argument of periastron
+need bounds lest the code wander to VERY extreme values and introduce rounding errors.
+
+INITIAL LOCATIONS OF WALKERS::
+The variables w0 through w7 are the randomly-generated initial values for the MCMC
+samplers. The exact location is largely unimportant, though it is helpful to have
+the walkers scattered slightly around a reasonable guess. If the guess is wrong, the
+parallel-tempering will explore the full parameter space and eventually arrive at the
+correct local minimum. However, it is ESSENTIAL to keep these initial locations WITHIN
+the hard bounds defined in the priors in the previous step. If a walker is initialized
+OUTSIDE these strict bounds, such that the first evaluation of logp() returns -inf,
+that walker WILL NOT MOVE. To ensure all walkers are actually producing samples, check
+that they are initialized inside the bounds of the priors.
+
+VARIABLES::
+Each of these variables appears at the top of the script, after the python
+'import' statements but before any function definitions/other code.
+
+savename :      Base name for .npz save files, including the file path.
+                Saves will be named savename_i.npz, where i is a sequentially
+                increasing file number.
+filename :      Path to .csv file containing observed astrometry. Needs 2 identical
+                columns of epochs [due to a convention in the code that I never
+                removed], and x/y astrometry and uncertainties for each unique epoch.
+                Epochs should be in MJD, and astrometry in milliarcseconds (converted
+                to arcseconds when imported). Epochs and astrometry are imported with
+                calls to np.genfromtxt(). Ensure the correct columns are specified to
+                import the correct data, using the usecols kwarg.
+nthreads :      Number of threads to use for parallelized MCMC. For best results, set
+                to the number of available CPU cores.
+ntemps :        Numbwer of temperatures to use for parallel-tempering. Effectively runs
+                ntemps different MCMCs, with progressively less weight assigned to the
+                likelihood function and more to the prior probability at higher temps.
+                Max-temperature chains sample entirely from the priors, exploring the full
+                allowed parameter space. Chains occasionally "swap" temperatures to help
+                low-temperature chains avoid getting stuck in local, but not global,
+                probability maxima. Default (which may be overkill) is ntemps = 20.
+nwalkers :      Number of MCMC walkers to use. More walkers provide more independent
+                samples of the posterior distribution, at the cost of greater computation
+                time. Standard practice has always been nwalkers = 128, and I have never
+                found need to change this.
+ndim :          Number of fit parameters; in all pre-provided scripts, ndim = 8.
+niter :         Total number of MCMC steps to perform, after burn-in.
+num_files :     Total number of files to save. Files will be prefixed with "savename" and
+                suffixed between 0 and num_files-1.
+thin :          If results are highly autocorrelated, it may be desirable to save every
+                N steps rather than every individual step. In that case, set thin = N.
+nburn :         Before the orbitfit begins, a number (nburn) of "burn-in" steps are
+                calculated, to enable the MCMC walkers to explore the parameter space and
+                converge onto the posterior from which we wish to sample. With parallel-
+                tempering (used always in this code), this burn-in happens relatively quickly,
+                but users may wish to increase this parameter for stubborn cases.
+
+SYNTAX TO RUN::
+Once the above variables have been set to the desired values, the code can be run from the
+command line simply by typing "python <orbit_script_name>.py," where <orbit_script_name> is
+the name of the desired script.
+
+
+
+
+---GENERATING PLOTS---
+
+VARIABLES::
+
+Fewer variables are involved in these scripts. 
+
+filename :      As in the previous section, the name of the astrometry file. Needed in order to
+                compare predicted orbit to observed astrometry.
+save_file_base: Same as "savename" in the previous section. Needed to extract the saved values
+                generated by the MCMC.
+num_files :     Total number of saved .npz files to use in generating the plots. The "orbitfit"
+                scripts save their progress as they proceed, and similarly, the plotting scripts
+                can generate a partial snapshot of an orbitfit that has not yet finished, by
+                setting this variable to the number of files that have already been saved.
+
+If these variables are provided, the scripts should run without incident. As with the orbit
+fitting scripts, the syntax is "python <plotting_script_name>.py".
+
+LIST OF PLOTS::
+
+Plots generated should include:
+--Corner plot of covariances between fit parameters & histograms of individual parameters. An
+    inset plot traces the orbit through x & y astrometry. No suffix.
+--Residuals of the maximum-likelihood orbit, in x/y and sep/PA space.
+    Suffix: _resid or _resid_seppa
+--Visualizations of the chains wandering through the parameter space, for convergence-checking.
+    Suffix: paramNchains where N = index of MCMC parameter, from 0 to 7
